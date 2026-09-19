@@ -2,22 +2,16 @@
 
 Sistema ligero para controlar asistencia en clases mediante QR. El maestro genera un QR con vigencia limitada, los alumnos lo escanean y registran su matrícula. El sistema detecta trampa si un mismo dispositivo intenta registrarse con varias matrículas.
 
+# ESTA TODO HECHO CON IA... USAR BAJO SU PROPIA RESPONSABILIDAD. 
+
 ## Stack
 
 - **Next.js 16** (App Router, output: standalone) + TypeScript
 - **Prisma ORM** con **libSQL adapter** (SQLite local o Turso en la nube)
 - **Tailwind CSS 4** + **shadcn/ui**
 - **qrcode.react** para generar QR
-- Middleware de cabeceras de seguridad (CSP-ready, X-Frame-Options, HSTS, etc.)
 
 ## ⚠️ IMPORTANTE — Versión con seguridad
-
-Esta versión incluye los fixes de los issues críticos del audit:
-- ✅ **#1 Auth del maestro**: todos los endpoints del maestro requieren password
-- ✅ **#2 Anti-trampa server-side**: la huella del dispositivo la calcula el servidor (no el cliente)
-- ✅ **#5 XSS en name**: sanitización de HTML en el servidor
-- ✅ **#6 Cabeceras de seguridad**: middleware global con X-Frame-Options, HSTS, etc.
-- ✅ **#10 Validación de matrícula**: solo letras y números, 2-15 chars
 
 Necesitas configurar una nueva env var: **`TEACHER_PASSWORD`** (mínimo 6 caracteres).
 
@@ -47,19 +41,21 @@ Guía de cero a producción. ~15 min.
 
 1. Entra a <https://turso.tech>, login con GitHub.
 2. **Create Database**:
-   - Name: `checador`
+   - Name: `nombredetuproyecto`
    - Location: AWS US East (Virginia) o la más cercana
    - Type: SQLite
 3. Entra a la base de datos creada → copia la **URL** (algo como `libsql://checador-xxxxx.aws-us-east-1.turso.io`)
 4. Ve a **Settings → Authentication Tokens → Create Token** → nombre `checador-prod` → copia el token
 5. Anota estos dos valores:
-   - **DATABASE_URL** = `libsql://checador-xxxxx.turso.io`
+   - **DATABASE_URL** = `libsql://nbombrequetedan.turso.io`
    - **DATABASE_AUTH_TOKEN** = `tu-token-largo`
 
 ### Paso 3 — Crear Web Service en Render
 
 1. Entra a <https://dashboard.render.com> → **New +** → **Web Service**
-2. **Connect a repository** → selecciona `checador-asistencia`
+
+2. **Connect a repository** → selecciona `**NOMBRE DE TU REPO** `
+
 3. Completa:
    - **Name**: `checador-asistencia`
    - **Language**: Node (se detecta solo)
@@ -75,6 +71,7 @@ Guía de cero a producción. ~15 min.
      npm run start
      ```
    - **Instance Type**: **Free** (suficiente para uso educativo)
+
 4. Baja hasta **Environment Variables** y agrega **3 variables**:
 
    | Key | Value |
@@ -82,8 +79,6 @@ Guía de cero a producción. ~15 min.
    | `DATABASE_URL` | `libsql://checador-xxxxx.turso.io` (tu URL de Turso) |
    | `DATABASE_AUTH_TOKEN` | tu token de Turso |
    | `TEACHER_PASSWORD` | contraseña del maestro, mínimo 6 caracteres (elíge una fuerte) |
-
-   > ⚠️ NO agregues `NODE_ENV` ni `HOSTNAME` — ya están baked en el código.
 
 5. **Create Web Service**. Render tarda 3-5 min en el primer deploy.
 
@@ -122,32 +117,16 @@ Guía de cero a producción. ~15 min.
 
 ## Medidas anti-trampa (mejoradas en esta versión)
 
-Las **direcciones MAC no son accesibles desde el navegador** por seguridad. En su lugar, este sistema usa varias capas:
+1. **Token de un solo uso** 
+2. **Ventana de tiempo** — el QR caduca 
+3. **Matrícula única por sesión** 
+4. **Huella SERVER-SIDE** ⭐ — SHA-256 
+5. **Cookie HTTP-only firmada** ⭐ 
 
-1. **Token de un solo uso** — el QR lleva un token aleatorio de 32 caracteres hex (128 bits).
-2. **Ventana de tiempo** — el QR caduca a los X minutos definidos (default 15).
-3. **Matrícula única por sesión** — restricción en la base de datos.
-4. **Huella SERVER-SIDE** ⭐ — SHA-256 de (User-Agent + Accept-Language + sec-ch-ua + IP). El servidor calcula esta huella, no confía en el cliente. Un alumno con curl no puede forjarla trivialmente.
-5. **Cookie HTTP-only firmada** ⭐ — el servidor setea una cookie `asist_track` firmada con un secreto. El alumno no puede leerla ni forjarla desde JS.
-6. **Auth del maestro** — todos los endpoints sensibles requieren password.
 
 ### Limitaciones honestas
 
-Ningún sistema web es 100% anti-trampa. Un alumno técnico podría:
-- Usar varios navegadores distintos (uno por matrícula) → cookies distintas, huellas distintas.
-- Limpiar cookies entre cada registro → cookies nuevas.
-- Usar curl con headers custom → bypass temporal (aunque la IP sigue siendo la misma).
-
-El sistema eleva la barrera de "mandar un curl con datos falsos" a "configurar extensiones de navegador o usar varios navegadores", que ya es mucho trabajo. Para usos más rigurosos (alto valor, como exámenes finales), considera complementar con video conferencia sincrónica.
-
-## Auditoría de seguridad
-
-Se realizó una auditoría completa en `SECURITY-AUDIT.md`. Esta versión aplica los fixes de los issues críticos (#1, #2, #5, #6) y menores (#10). Los issues pendientes:
-- #3 — Tokens de un solo uso (rediseño del flujo QR, pendiente)
-- #4 — Rate limiting (pendiente, bajo riesgo con auth)
-- #7 — Hash débil del fingerprint anterior (ya resuelto: ahora usa SHA-256 real)
-- #8 — Longitud de token (ya resuelto: ahora es 32 chars / 128 bits)
-- #9 — Columna deviceUuid (pendiente, no crítico)
+Ningún sistema web es 100% anti-trampa. El sistema eleva la barrera. Para usos más rigurosos (alto valor, como exámenes finales), considera complementar con video conferencia sincrónica.
 
 ## ⚠️ Sobre el "sleep" en Render Free
 
@@ -192,17 +171,6 @@ npm run dev
 ```
 
 Abrir <http://localhost:3000>. Te pedirá la password de maestro.
-
-## Variables de entorno
-
-| Variable | Dónde | Para qué |
-|----------|-------|----------|
-| `DATABASE_URL` | Render env, .env local | URL de Turso (`libsql://...`) o SQLite local (`file:./db/custom.db`) |
-| `DATABASE_AUTH_TOKEN` | Render env | Token de Turso (vacío para SQLite local) |
-| `TEACHER_PASSWORD` | Render env, .env local | Contraseña para acceder al dashboard del maestro (mínimo 6 chars) |
-| `TRACKING_SECRET` | Render env (opcional) | Secreto para firmar cookies de tracking. Si no se setea, deriva de TEACHER_PASSWORD |
-| `NODE_ENV` | (auto-set por Render/Next.js) | No la setees manualmente — rompe el build |
-| `HOSTNAME` | (auto-set en start script) | No la setees — el código ya la fuerza a `0.0.0.0` |
 
 ## Licencia
 
