@@ -49,9 +49,11 @@ export async function GET(
 /**
  * PATCH /api/sessions/[token]
  * Cierra (o reabre) una sesion manualmente desde el panel del maestro.
- * Requiere password de maestro.
- *
  * Body: { isActive: boolean }
+ *
+ * IMPORTANTE: Cuando reabres (isActive = true), se EXTIENDE el endsAt
+ * automaticamente por la duracion original de la sesion.
+ * Asi el QR vuelve a estar vigente desde el momento en que lo abres.
  */
 export async function PATCH(
   req: NextRequest,
@@ -63,13 +65,37 @@ export async function PATCH(
   const { token } = await params
   const body = await req.json().catch(() => ({}))
   const isActive = Boolean(body.isActive)
+
+  // Si vamos a reabrir la sesion, calculamos nuevo endsAt = ahora + duracion original
+  // Si vamos a cerrar, dejamos endsAt como esta (para que el maestro sepa cuando caduco)
+  const now = new Date()
+  const updateData: { isActive: boolean; endsAt?: Date } = { isActive }
+
+  if (isActive) {
+    // Necesitamos leer la duracion original de la sesion primero
+    const existing = await db.classSession.findUnique({
+      where: { token },
+      select: { durationMin: true },
+    })
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Sesion no encontrada' },
+        { status: 404 }
+      )
+    }
+    // Nuevo endsAt: ahora + durationMin originales
+    updateData.endsAt = new Date(now.getTime() + existing.durationMin * 60_000)
+    // Tambien actualizamos startsAt para que la ventana "ahora" tenga sentido
+    updateData as { isActive: boolean; endsAt?: Date; startsAt?: Date }
+    ;(updateData as { startsAt?: Date }).startsAt = now
+  }
+
   const session = await db.classSession.update({
     where: { token },
-    data: { isActive },
+    data: updateData,
   })
   return NextResponse.json({ session })
 }
-
 /**
  * DELETE /api/sessions/[token]
  * Borra la sesion y, por cascade (ver schema Prisma), tambien borra
